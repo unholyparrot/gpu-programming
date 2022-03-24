@@ -16,12 +16,7 @@
 #define Y_GREEN 0.7154f
 #define Y_BLUE  0.0721f
 
-// #define Y_RED   0.299
-// #define Y_GREEN 0.587
-// #define Y_BLUE  0.114
-
-#define HISTOGRAM_BINS 256
-
+#define Y_LEVELS 256
 
 
 __global__ void saxpy(int n, float a, float *x, float *y) {
@@ -32,16 +27,8 @@ __global__ void saxpy(int n, float a, float *x, float *y) {
 void rgb2gray_CPU(uint8_t* rgb_image, uint8_t* gray_image, int h, int w) {
     for (int i = 0; i < h; ++i) {
         for (int j = 0; j < w; ++j) {
-            *gray_image++ = Y_RED * rgb_image[RED] + Y_GREEN * rgb_image[GREEN] + Y_BLUE * rgb_image[BLUE];
+            *gray_image++ = Y_RED * rgb_image[RED] + Y_GREEN * rgb_image[GREEN] + Y_BLUE * rgb_image[BLUE] + 0.5;
             rgb_image += 3;
-        }
-    }
-}
-
-void float2uint(float* src_img, uint8_t* dst_img, int h, int w) {
-    for (int i = 0; i < h; ++i) {
-        for (int j = 0; j < w; ++j) {
-            *dst_img++ = static_cast<uint8_t>(*src_img++ + 0.5);
         }
     }
 }
@@ -54,11 +41,21 @@ void histogram_CPU(uint8_t* gray_image, int* hist, int h, int w) {
     }
 }
 
+void create_mapper(int* hist, uint8_t* mapper, int pixel_count) {
+    int cumsum[Y_LEVELS] = {};
+    cumsum[0] = hist[0];
+    for (int i = 1; i < Y_LEVELS; ++i) {
+        cumsum[i] = cumsum[i-1] + hist[i];
+        mapper[i] = (Y_LEVELS * cumsum[i] + pixel_count - 1) / pixel_count - 1;
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cout << "Usage: <input_image> <output_image>" << std::endl;
         return 0;
     }
+    /// Load image
     int img_h, img_w, img_c;
     uint8_t* rgb_img = stbi_load(argv[1], &img_w, &img_h, &img_c, 0);
     if (!rgb_img) {
@@ -67,24 +64,46 @@ int main(int argc, char** argv) {
     }
     std::cout << "Image loaded successfully. Shape: (" << img_h << ", " << img_w << ", " << img_c << ")" << std::endl;
 
-    int plane_size = img_h * img_w;
-    uint8_t* gray_img = new uint8_t[plane_size];
+    // Allocate memory, initialize arrays
+    uint8_t* gray_img = new uint8_t[img_h * img_w];
+    int histogram[Y_LEVELS] = {};
+    uint8_t mapper[Y_LEVELS] = {};
+
+    // Start processing. CPU
     rgb2gray_CPU(rgb_img, gray_img, img_h, img_w);
-
-    int res = stbi_write_png(argv[2], img_w, img_h, 1, gray_img, 0);
-    if (!res) {
-        std::cout << stbi_failure_reason() << std::endl;
-        return 1;
+#ifdef _DEBUG
+    {
+        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_grayscale.png", img_w, img_h, 1, gray_img, 0);
+        if (!res) {
+            std::cout << stbi_failure_reason() << std::endl;
+            return 1;
+        }
     }
+#endif
 
-    int histogram[HISTOGRAM_BINS] = {};
     histogram_CPU(gray_img, histogram, img_h, img_w);
-
-    std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/hist.txt");
-    for (int i = 0; i < HISTOGRAM_BINS; ++i) {
-        out_f << histogram[i] << "\n";
+#ifdef _DEBUG
+    {
+        std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_hist.txt");
+        for (int i = 0; i < Y_LEVELS; ++i) {
+            out_f << histogram[i] << "\n";
+        }
     }
-    out_f.close();
+#endif
+    
+    create_mapper(histogram, mapper, img_h * img_w);
+#ifdef _DEBUG
+    {
+        std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_map.txt");
+        for (int i = 0; i < Y_LEVELS; ++i) {
+            out_f << static_cast<int>(mapper[i]) << "\n";
+        }
+    }
+#endif
+
+
+
+    // Start processing. GPU
 
     return 0;
 
