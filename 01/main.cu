@@ -27,7 +27,7 @@ __global__ void saxpy(int n, float a, float *x, float *y) {
 void rgb2gray_CPU(uint8_t* rgb_image, uint8_t* gray_image, int h, int w) {
     for (int i = 0; i < h; ++i) {
         for (int j = 0; j < w; ++j) {
-            *gray_image++ = Y_RED * rgb_image[RED] + Y_GREEN * rgb_image[GREEN] + Y_BLUE * rgb_image[BLUE] + 0.5;
+            *gray_image++ = Y_RED * rgb_image[RED] + Y_GREEN * rgb_image[GREEN] + Y_BLUE * rgb_image[BLUE];
             rgb_image += 3;
         }
     }
@@ -52,6 +52,17 @@ void create_mapper(int* hist, float* scaling_coeff, int pixel_count) {
     }
 }
 
+void autocontrast_CPU(uint8_t* rgb_src, uint8_t* rgb_dst, uint8_t* gray_img, float* scaling_coef, int h, int w, int c) {
+    for (int i = 0; i < h; ++i) {
+        for (int j = 0; j < w; ++j) {
+            float coef = scaling_coef[*gray_img++];
+            for (int k = 0; k < c; ++k) { // RGB or Y
+                *rgb_dst++ = std::min(*rgb_src++ * coef, 255.0f);
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cout << "Usage: <input_image> <output_image>" << std::endl;
@@ -68,6 +79,7 @@ int main(int argc, char** argv) {
 
     // Allocate memory, initialize arrays
     uint8_t* gray_img = new uint8_t[img_h * img_w];
+    uint8_t* res_img = new uint8_t[img_h * img_w * img_c];
     int histogram[Y_LEVELS] = {};
     float scaling_coeff[Y_LEVELS] = {};
 
@@ -98,12 +110,39 @@ int main(int argc, char** argv) {
     {
         std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_map.txt");
         for (int i = 0; i < Y_LEVELS; ++i) {
-            out_f << scaling_coeff[i] << "\n";
+            out_f << scaling_coeff[i] << " " << scaling_coeff[i] * i << "\n";
+        }
+    }
+#endif
+    
+#ifdef _DEBUG
+    {
+        autocontrast_CPU(gray_img, res_img, gray_img, scaling_coeff, img_h, img_w, 1);
+        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result_gray.png", img_w, img_h, 1, res_img, 0);
+        if (!res) {
+            std::cout << stbi_failure_reason() << std::endl;
+            return 1;
         }
     }
 #endif
 
+    autocontrast_CPU(rgb_img, res_img, gray_img, scaling_coeff, img_h, img_w, img_c);
+#ifdef _DEBUG
+    {
+        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result.png", img_w, img_h, img_c, res_img, 0);
+        if (!res) {
+            std::cout << stbi_failure_reason() << std::endl;
+            return 1;
+        }
+    }
+#endif
 
+    // Save image
+    int res = stbi_write_png(argv[2], img_w, img_h, img_c, res_img, 0);
+    if (!res) {
+        std::cout << stbi_failure_reason() << std::endl;
+        return 1;
+    }
 
     // Start processing. GPU
 
