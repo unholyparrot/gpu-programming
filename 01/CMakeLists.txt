@@ -4,8 +4,8 @@ project(gpu_task_01 LANGUAGES CXX CUDA)
 include(CTest)
 
 add_executable(main
-    # stb_image.h
-    # stb_image_write.h
+    stb_image.h
+    stb_image_write.h
     main.cu
 )
 
