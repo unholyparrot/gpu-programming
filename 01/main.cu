@@ -41,12 +41,14 @@ void histogram_CPU(uint8_t* gray_image, int* hist, int h, int w) {
     }
 }
 
-void create_mapper(int* hist, uint8_t* mapper, int pixel_count) {
+void create_mapper(int* hist, float* scaling_coeff, int pixel_count) {
     int cumsum[Y_LEVELS] = {};
     cumsum[0] = hist[0];
+    scaling_coeff[0] = 0;
     for (int i = 1; i < Y_LEVELS; ++i) {
         cumsum[i] = cumsum[i-1] + hist[i];
-        mapper[i] = (Y_LEVELS * cumsum[i] + pixel_count - 1) / pixel_count - 1;
+        // mapper[i] = (Y_LEVELS * cumsum[i] + pixel_count - 1) / pixel_count - 1;
+        scaling_coeff[i] = static_cast<float>((Y_LEVELS * cumsum[i] + pixel_count - 1) / pixel_count - 1) / i;
     }
 }
 
@@ -67,7 +69,7 @@ int main(int argc, char** argv) {
     // Allocate memory, initialize arrays
     uint8_t* gray_img = new uint8_t[img_h * img_w];
     int histogram[Y_LEVELS] = {};
-    uint8_t mapper[Y_LEVELS] = {};
+    float scaling_coeff[Y_LEVELS] = {};
 
     // Start processing. CPU
     rgb2gray_CPU(rgb_img, gray_img, img_h, img_w);
@@ -91,12 +93,12 @@ int main(int argc, char** argv) {
     }
 #endif
     
-    create_mapper(histogram, mapper, img_h * img_w);
+    create_mapper(histogram, scaling_coeff, img_h * img_w);
 #ifdef _DEBUG
     {
         std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_map.txt");
         for (int i = 0; i < Y_LEVELS; ++i) {
-            out_f << static_cast<int>(mapper[i]) << "\n";
+            out_f << scaling_coeff[i] << "\n";
         }
     }
 #endif
