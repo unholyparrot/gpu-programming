@@ -9,28 +9,44 @@
 #include <cstdint>
 #include <cstdlib>
 
-#define RED     0
-#define GREEN   1
-#define BLUE    2
+#define RED         0
+#define GREEN       1
+#define BLUE        2
+#define NUM_COLORS  3
+
 #define Y_RED   0.2125f
 #define Y_GREEN 0.7154f
 #define Y_BLUE  0.0721f
 
 #define Y_LEVELS 256
-
+#define BLOCK_SZ 32
 
 __global__ void saxpy(int n, float a, float *x, float *y) {
     int i = blockIdx.x*blockDim.x + threadIdx.x;
     if (i < n) y[i] = a*x[i] + y[i];
 }
 
-void rgb2gray_CPU(uint8_t* rgb_image, uint8_t* gray_image, int h, int w) {
+void rgb2gray_CPU(const uint8_t* rgb_image, uint8_t* gray_image, int h, int w) {
     for (int i = 0; i < h; ++i) {
         for (int j = 0; j < w; ++j) {
             *gray_image++ = Y_RED * rgb_image[RED] + Y_GREEN * rgb_image[GREEN] + Y_BLUE * rgb_image[BLUE];
             rgb_image += 3;
         }
     }
+}
+
+__global__ void rgb2gray_GPU(const uint8_t* rgb_image, uint8_t* gray_image, int h, int w) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= w || y >= h) {
+        return;
+    }
+
+    const uint8_t* in_pixel = rgb_image + NUM_COLORS * (y * w + x);
+    uint8_t* out_pixel = gray_image + y * w + x;
+
+    *out_pixel = Y_RED * in_pixel[RED] + Y_GREEN * in_pixel[GREEN] + Y_BLUE * in_pixel[BLUE];
 }
 
 void histogram_CPU(uint8_t* gray_image, int* hist, int h, int w) {
@@ -77,17 +93,17 @@ int main(int argc, char** argv) {
     }
     std::cout << "Image loaded successfully. Shape: (" << img_h << ", " << img_w << ", " << img_c << ")" << std::endl;
 
+    // Start processing. CPU
     // Allocate memory, initialize arrays
     uint8_t* gray_img = new uint8_t[img_h * img_w];
     uint8_t* res_img = new uint8_t[img_h * img_w * img_c];
     int histogram[Y_LEVELS] = {};
     float scaling_coeff[Y_LEVELS] = {};
 
-    // Start processing. CPU
     rgb2gray_CPU(rgb_img, gray_img, img_h, img_w);
 #ifdef _DEBUG
     {
-        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_grayscale.png", img_w, img_h, 1, gray_img, 0);
+        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_grayscale_CPU.png", img_w, img_h, 1, gray_img, 0);
         if (!res) {
             std::cout << stbi_failure_reason() << std::endl;
             return 1;
@@ -98,7 +114,7 @@ int main(int argc, char** argv) {
     histogram_CPU(gray_img, histogram, img_h, img_w);
 #ifdef _DEBUG
     {
-        std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_hist.txt");
+        std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_hist_CPU.txt");
         for (int i = 0; i < Y_LEVELS; ++i) {
             out_f << histogram[i] << "\n";
         }
@@ -108,7 +124,7 @@ int main(int argc, char** argv) {
     create_mapper(histogram, scaling_coeff, img_h * img_w);
 #ifdef _DEBUG
     {
-        std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_map.txt");
+        std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_map_CPU.txt");
         for (int i = 0; i < Y_LEVELS; ++i) {
             out_f << scaling_coeff[i] << " " << scaling_coeff[i] * i << "\n";
         }
@@ -118,7 +134,7 @@ int main(int argc, char** argv) {
 #ifdef _DEBUG
     {
         autocontrast_CPU(gray_img, res_img, gray_img, scaling_coeff, img_h, img_w, 1);
-        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result_gray.png", img_w, img_h, 1, res_img, 0);
+        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result_gray_CPU.png", img_w, img_h, 1, res_img, 0);
         if (!res) {
             std::cout << stbi_failure_reason() << std::endl;
             return 1;
@@ -129,7 +145,7 @@ int main(int argc, char** argv) {
     autocontrast_CPU(rgb_img, res_img, gray_img, scaling_coeff, img_h, img_w, img_c);
 #ifdef _DEBUG
     {
-        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result.png", img_w, img_h, img_c, res_img, 0);
+        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result_CPU.png", img_w, img_h, img_c, res_img, 0);
         if (!res) {
             std::cout << stbi_failure_reason() << std::endl;
             return 1;
@@ -145,6 +161,27 @@ int main(int argc, char** argv) {
     }
 
     // Start processing. GPU
+    uint8_t *rgb_img_device, *gray_img_device, *res_img_device;
+    cudaMalloc(&rgb_img_device, img_h * img_w * img_c);
+    cudaMalloc(&gray_img_device, img_h * img_w);
+    cudaMalloc(&res_img_device, img_h * img_w * img_c);
+    dim3 grid_dim((img_w + BLOCK_SZ - 1) / BLOCK_SZ, (img_h + BLOCK_SZ - 1) / BLOCK_SZ);
+    dim3 block_dim(BLOCK_SZ, BLOCK_SZ);
+
+    cudaMemcpy(rgb_img_device, rgb_img, img_h * img_w * img_c, cudaMemcpyHostToDevice);
+    rgb2gray_GPU<<<grid_dim, block_dim>>>(rgb_img_device, gray_img_device, img_h, img_w);
+#ifdef _DEBUG
+    {
+        cudaMemcpy(gray_img, gray_img_device, img_h * img_w, cudaMemcpyDeviceToHost);
+        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_grayscale_GPU.png", img_w, img_h, 1, gray_img, 0);
+        if (!res) {
+            std::cout << stbi_failure_reason() << std::endl;
+            return 1;
+        }
+    }
+#endif
+
+
 
     return 0;
 
