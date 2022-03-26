@@ -36,17 +36,21 @@ void rgb2gray_CPU(const uint8_t* rgb_image, uint8_t* gray_image, int h, int w) {
 }
 
 __global__ void rgb2gray_GPU(const uint8_t* rgb_image, uint8_t* gray_image, int h, int w) {
+    // pixel coordinates
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
+    // number of processed pixels
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
 
-    if (x >= w || y >= h) {
-        return;
+    for (int i = y; i < h; i += ny) {
+        for (int j = x; j < w; j += nx) {
+            const uint8_t* in_pixel = rgb_image + NUM_COLORS * (i * w + j);
+            uint8_t* out_pixel = gray_image + i * w + j;
+
+            *out_pixel = Y_RED * in_pixel[RED] + Y_GREEN * in_pixel[GREEN] + Y_BLUE * in_pixel[BLUE];
+        }
     }
-
-    const uint8_t* in_pixel = rgb_image + NUM_COLORS * (y * w + x);
-    uint8_t* out_pixel = gray_image + y * w + x;
-
-    *out_pixel = Y_RED * in_pixel[RED] + Y_GREEN * in_pixel[GREEN] + Y_BLUE * in_pixel[BLUE];
 }
 
 void histogram_CPU(uint8_t* gray_image, int* hist, int h, int w) {
@@ -54,6 +58,43 @@ void histogram_CPU(uint8_t* gray_image, int* hist, int h, int w) {
         for (int j = 0; j < w; ++j) {
             ++hist[*gray_image++];
         }
+    }
+}
+
+
+__global__ void histogram_local_GPU(const uint8_t *gray_img, int* all_hist, int h, int w) {
+    int t = threadIdx.y * blockDim.x + threadIdx.x; // thread linear idx in block
+    int num_threads = blockDim.x * blockDim.y;      // thread total count in block
+    
+    __shared__ int local_hist[Y_LEVELS];
+    for (int i = t; i < Y_LEVELS; i += num_threads)
+        local_hist[i] = 0;
+    __syncthreads();
+
+    // pixel coordinates
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    // number of processed pixels
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+
+    for (int i = y; i < h; i += ny)
+        for (int j = x; j < w; j += nx)
+            atomicAdd(local_hist + gray_img[i * w + j], 1);
+    __syncthreads();
+
+    all_hist += (blockIdx.y * gridDim.x + blockIdx.x) * Y_LEVELS;
+    for (int i = t; i < Y_LEVELS; i += num_threads)
+        all_hist[i] = local_hist[i];
+}
+
+__global__ void histogram_final_GPU(const int *all_hist, int *hist, int n) {
+    int t = blockIdx.x * blockDim.x + threadIdx.x; // thread global idx
+    if (t < Y_LEVELS) {
+        int total = 0;
+        for (int j = 0; j < n; j++) 
+            total += all_hist[j * Y_LEVELS + t];
+        hist[t] = total;
     }
 }
 
@@ -162,11 +203,15 @@ int main(int argc, char** argv) {
 
     // Start processing. GPU
     uint8_t *rgb_img_device, *gray_img_device, *res_img_device;
+    int *all_hist_device, *histogram_device;
+    dim3 grid_dim((img_w + BLOCK_SZ - 1) / BLOCK_SZ, (img_h + BLOCK_SZ - 1) / BLOCK_SZ);
+    dim3 block_dim(BLOCK_SZ, BLOCK_SZ);
+
     cudaMalloc(&rgb_img_device, img_h * img_w * img_c);
     cudaMalloc(&gray_img_device, img_h * img_w);
     cudaMalloc(&res_img_device, img_h * img_w * img_c);
-    dim3 grid_dim((img_w + BLOCK_SZ - 1) / BLOCK_SZ, (img_h + BLOCK_SZ - 1) / BLOCK_SZ);
-    dim3 block_dim(BLOCK_SZ, BLOCK_SZ);
+    cudaMalloc(&all_hist_device, Y_LEVELS * grid_dim.x * grid_dim.y * sizeof(int));
+    cudaMalloc(&histogram_device, Y_LEVELS * sizeof(int));    
 
     cudaMemcpy(rgb_img_device, rgb_img, img_h * img_w * img_c, cudaMemcpyHostToDevice);
     rgb2gray_GPU<<<grid_dim, block_dim>>>(rgb_img_device, gray_img_device, img_h, img_w);
@@ -181,7 +226,18 @@ int main(int argc, char** argv) {
     }
 #endif
 
-
+    histogram_local_GPU<<<grid_dim, block_dim>>>(gray_img_device, all_hist_device, img_h, img_w);
+    histogram_final_GPU<<<1, Y_LEVELS>>>(all_hist_device, histogram_device, grid_dim.x * grid_dim.y);
+#ifdef _DEBUG
+    {
+        int debug_hist[Y_LEVELS] = {};
+        cudaMemcpy(debug_hist, histogram_device, Y_LEVELS * sizeof(int), cudaMemcpyDeviceToHost);
+        std::ofstream out_f("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_hist_GPU.txt");
+        for (int i = 0; i < Y_LEVELS; ++i) {
+            out_f << debug_hist[i] << "\n";
+        }
+    }
+#endif
 
     return 0;
 
