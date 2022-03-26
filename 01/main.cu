@@ -21,84 +21,79 @@
 #define Y_LEVELS 256
 #define BLOCK_SZ 32
 
-__global__ void saxpy(int n, float a, float *x, float *y) {
-    int i = blockIdx.x*blockDim.x + threadIdx.x;
-    if (i < n) y[i] = a*x[i] + y[i];
-}
-
-void rgb2gray_CPU(const uint8_t* rgb_image, uint8_t* gray_image, int h, int w) {
-    for (int i = 0; i < h; ++i) {
-        for (int j = 0; j < w; ++j) {
+void rgb2gray_CPU(const uint8_t* rgb_image, uint8_t* gray_image, int height, int width) {
+    for (int i = 0; i < height; ++i) {
+        for (int j = 0; j < width; ++j) {
             *gray_image++ = Y_RED * rgb_image[RED] + Y_GREEN * rgb_image[GREEN] + Y_BLUE * rgb_image[BLUE];
-            rgb_image += 3;
+            rgb_image += NUM_COLORS;
         }
     }
 }
 
-__global__ void rgb2gray_GPU(const uint8_t* rgb_image, uint8_t* gray_image, int h, int w) {
-    // pixel coordinates
+__global__ void rgb2gray_GPU(const uint8_t* rgb_image, uint8_t* gray_image, int height, int width) {
+    // coordinates of the first pixel to process
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    // number of processed pixels
+    // number of processed pixels by step
     int nx = blockDim.x * gridDim.x;
     int ny = blockDim.y * gridDim.y;
 
-    for (int i = y; i < h; i += ny) {
-        for (int j = x; j < w; j += nx) {
-            const uint8_t* in_pixel = rgb_image + NUM_COLORS * (i * w + j);
-            uint8_t* out_pixel = gray_image + i * w + j;
+    for (int i = y; i < height; i += ny) {
+        for (int j = x; j < width; j += nx) {
+            int linear_idx = i * width + j;
+            const uint8_t* in_pixel = rgb_image + NUM_COLORS * linear_idx;
+            uint8_t* out_pixel = gray_image + linear_idx;
 
             *out_pixel = Y_RED * in_pixel[RED] + Y_GREEN * in_pixel[GREEN] + Y_BLUE * in_pixel[BLUE];
         }
     }
 }
 
-void histogram_CPU(uint8_t* gray_image, int* hist, int h, int w) {
-    for (int i = 0; i < h; ++i) {
-        for (int j = 0; j < w; ++j) {
-            ++hist[*gray_image++];
-        }
-    }
+void histogram_CPU(const uint8_t* gray_img, int* hist, int height, int width) {
+    for (int i = 0; i < height; ++i)
+        for (int j = 0; j < width; ++j)
+            ++hist[*gray_img++];
 }
 
-
-__global__ void histogram_local_GPU(const uint8_t *gray_img, int* all_hist, int h, int w) {
+__global__ void histogram_local_GPU(const uint8_t *gray_img, int* all_hists, int height, int width) {
     int t = threadIdx.y * blockDim.x + threadIdx.x; // thread linear idx in block
     int num_threads = blockDim.x * blockDim.y;      // thread total count in block
     
+    // initialize local histogram for one block
     __shared__ int local_hist[Y_LEVELS];
     for (int i = t; i < Y_LEVELS; i += num_threads)
         local_hist[i] = 0;
     __syncthreads();
 
-    // pixel coordinates
+    // coordinates of the first pixel to process
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    // number of processed pixels
+    // number of processed pixels by step
     int nx = blockDim.x * gridDim.x;
     int ny = blockDim.y * gridDim.y;
 
-    for (int i = y; i < h; i += ny)
-        for (int j = x; j < w; j += nx)
-            atomicAdd(local_hist + gray_img[i * w + j], 1);
+    for (int i = y; i < height; i += ny)
+        for (int j = x; j < width; j += nx)
+            atomicAdd(local_hist + gray_img[i * width + j], 1);
     __syncthreads();
 
-    all_hist += (blockIdx.y * gridDim.x + blockIdx.x) * Y_LEVELS;
+    // copy local hist to global memory
+    all_hists += (blockIdx.y * gridDim.x + blockIdx.x) * Y_LEVELS;
     for (int i = t; i < Y_LEVELS; i += num_threads)
-        all_hist[i] = local_hist[i];
+        all_hists[i] = local_hist[i];
 }
 
-__global__ void histogram_final_GPU(const int *all_hist, int *hist, int n) {
+__global__ void histogram_final_GPU(const int *all_hists, int *hist, int num_hists) {
     int t = blockIdx.x * blockDim.x + threadIdx.x; // thread global idx
     if (t < Y_LEVELS) {
         int total = 0;
-        for (int j = 0; j < n; j++) 
-            total += all_hist[j * Y_LEVELS + t];
+        for (int i = 0; i < num_hists; i++) 
+            total += all_hists[i * Y_LEVELS + t];
         hist[t] = total;
     }
 }
 
-void create_mapper(int* hist, float* scaling_coeff, int pixel_count) {
+void create_mapper(const int* hist, float* scaling_coeff, int pixel_count) {
     int cumsum[Y_LEVELS] = {};
     cumsum[0] = hist[0];
     scaling_coeff[0] = 0;
@@ -109,32 +104,41 @@ void create_mapper(int* hist, float* scaling_coeff, int pixel_count) {
     }
 }
 
-void autocontrast_CPU(uint8_t* rgb_src, uint8_t* rgb_dst, uint8_t* gray_img, float* scaling_coef, int h, int w, int c) {
-    for (int i = 0; i < h; ++i) {
-        for (int j = 0; j < w; ++j) {
+void autocontrast_CPU(
+    const uint8_t* rgb_src, uint8_t* rgb_dst,
+    const uint8_t* gray_img, const float* scaling_coef,
+    int height, int width, int channels)
+{
+    for (int i = 0; i < height; ++i) {
+        for (int j = 0; j < width; ++j) {
             float coef = scaling_coef[*gray_img++];
-            for (int k = 0; k < c; ++k) { // RGB or Y
+            for (int k = 0; k < channels; ++k) { // RGB or Y
                 *rgb_dst++ = std::min(*rgb_src++ * coef, 255.0f);
             }
         }
     }
 }
 
-__global__ void autocontrast_GPU(const uint8_t* rgb_src, uint8_t* rgb_dst, const uint8_t* gray_img, const float* scaling_coef, int h, int w, int c) {
-    // pixel coordinates
+__global__ void autocontrast_GPU(
+    const uint8_t* rgb_src, uint8_t* rgb_dst,
+    const uint8_t* gray_img, const float* scaling_coef,
+    int height, int width, int channels)
+{
+    // coordinates of the first pixel to process
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    // number of processed pixels
+    // number of processed pixels by step
     int nx = blockDim.x * gridDim.x;
     int ny = blockDim.y * gridDim.y;
 
-    for (int i = y; i < h; i += ny) {
-        for (int j = x; j < w; j += nx) {
-            int linear_idx = i * w + j;
+    for (int i = y; i < height; i += ny) {
+        for (int j = x; j < width; j += nx) {
+            int linear_idx = i * width + j;
             const uint8_t* in_pixel = rgb_src + NUM_COLORS * linear_idx;
             uint8_t* out_pixel = rgb_dst + NUM_COLORS * linear_idx;
             float coef = scaling_coef[gray_img[linear_idx]];
-            for (int k = 0; k < c; ++k) { // RGB or Y
+
+            for (int k = 0; k < channels; ++k) { // RGB or Y
                 *out_pixel++ = min(*in_pixel++ * coef, 255.0f);
             }
         }
@@ -290,38 +294,4 @@ int main(int argc, char** argv) {
 
 
     return 0;
-
-
-
-
-    int N = 1<<20;
-    float *x, *y, *d_x, *d_y;
-    x = (float*)malloc(N*sizeof(float));
-    y = (float*)malloc(N*sizeof(float));
-
-    cudaMalloc(&d_x, N*sizeof(float)); 
-    cudaMalloc(&d_y, N*sizeof(float));
-
-    for (int i = 0; i < N; i++) {
-        x[i] = 1.0f;
-        y[i] = 2.0f;
-    }
-
-    cudaMemcpy(d_x, x, N*sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_y, y, N*sizeof(float), cudaMemcpyHostToDevice);
-
-    // Perform SAXPY on 1M elements
-    saxpy<<<(N+255)/256, 256>>>(N, 2.0f, d_x, d_y);
-
-    cudaMemcpy(y, d_y, N*sizeof(float), cudaMemcpyDeviceToHost);
-
-    float maxError = 0.0f;
-    for (int i = 0; i < N; i++)
-        maxError = max(maxError, abs(y[i]-4.0f));
-    printf("Max error: %f\n", maxError);
-
-    cudaFree(d_x);
-    cudaFree(d_y);
-    free(x);
-    free(y);
 }
