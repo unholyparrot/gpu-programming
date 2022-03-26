@@ -120,6 +120,27 @@ void autocontrast_CPU(uint8_t* rgb_src, uint8_t* rgb_dst, uint8_t* gray_img, flo
     }
 }
 
+__global__ void autocontrast_GPU(const uint8_t* rgb_src, uint8_t* rgb_dst, const uint8_t* gray_img, const float* scaling_coef, int h, int w, int c) {
+    // pixel coordinates
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    // number of processed pixels
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+
+    for (int i = y; i < h; i += ny) {
+        for (int j = x; j < w; j += nx) {
+            int linear_idx = i * w + j;
+            const uint8_t* in_pixel = rgb_src + NUM_COLORS * linear_idx;
+            uint8_t* out_pixel = rgb_dst + NUM_COLORS * linear_idx;
+            float coef = scaling_coef[gray_img[linear_idx]];
+            for (int k = 0; k < c; ++k) { // RGB or Y
+                *out_pixel++ = min(*in_pixel++ * coef, 255.0f);
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cout << "Usage: <input_image> <output_image>" << std::endl;
@@ -204,6 +225,7 @@ int main(int argc, char** argv) {
     // Start processing. GPU
     uint8_t *rgb_img_device, *gray_img_device, *res_img_device;
     int *all_hist_device, *histogram_device;
+    float *scaling_coeff_device;
     dim3 grid_dim((img_w + BLOCK_SZ - 1) / BLOCK_SZ, (img_h + BLOCK_SZ - 1) / BLOCK_SZ);
     dim3 block_dim(BLOCK_SZ, BLOCK_SZ);
 
@@ -211,7 +233,8 @@ int main(int argc, char** argv) {
     cudaMalloc(&gray_img_device, img_h * img_w);
     cudaMalloc(&res_img_device, img_h * img_w * img_c);
     cudaMalloc(&all_hist_device, Y_LEVELS * grid_dim.x * grid_dim.y * sizeof(int));
-    cudaMalloc(&histogram_device, Y_LEVELS * sizeof(int));    
+    cudaMalloc(&histogram_device, Y_LEVELS * sizeof(int));
+    cudaMalloc(&scaling_coeff_device, Y_LEVELS * sizeof(float));
 
     cudaMemcpy(rgb_img_device, rgb_img, img_h * img_w * img_c, cudaMemcpyHostToDevice);
     rgb2gray_GPU<<<grid_dim, block_dim>>>(rgb_img_device, gray_img_device, img_h, img_w);
@@ -238,6 +261,33 @@ int main(int argc, char** argv) {
         }
     }
 #endif
+
+    cudaMemcpy(histogram, histogram_device, Y_LEVELS * sizeof(int), cudaMemcpyDeviceToHost);
+    create_mapper(histogram, scaling_coeff, img_h * img_w);
+    cudaMemcpy(scaling_coeff_device, scaling_coeff, Y_LEVELS * sizeof(float), cudaMemcpyHostToDevice);
+
+    autocontrast_GPU<<<grid_dim, block_dim>>>(rgb_img_device, res_img_device, gray_img_device, scaling_coeff_device, img_h, img_w, img_c);
+    cudaMemcpy(res_img, res_img_device, img_h * img_w * img_c, cudaMemcpyDeviceToHost);
+#ifdef _DEBUG
+    {
+        int res = stbi_write_png("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result_GPU.png", img_w, img_h, img_c, res_img, 0);
+        if (!res) {
+            std::cout << stbi_failure_reason() << std::endl;
+            return 1;
+        }
+    }
+#endif
+
+    // Save image
+    std::string out_fname(argv[2]);
+    out_fname += "GPU.png";
+    res = stbi_write_png(out_fname.c_str(), img_w, img_h, img_c, res_img, 0);
+    if (!res) {
+        std::cout << stbi_failure_reason() << std::endl;
+        return 1;
+    }
+
+
 
     return 0;
 
