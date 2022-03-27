@@ -213,7 +213,7 @@ void save_image(const char* filename, const uint8_t* img, int height, int width,
 }
 
 void process_CPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w, int img_c) {
-    Timer cpu_timer(std::string("CPU processing, ") + std::to_string(OMP_THREADS_NUM) + " OMP threads");
+    Timer cpu_timer(std::string("CPU, ") + std::to_string(OMP_THREADS_NUM) + " OMP threads");
     omp_set_num_threads(OMP_THREADS_NUM);
     cpu_timer.start();
     uint8_t* gray_img = new uint8_t[img_h * img_w];
@@ -239,7 +239,8 @@ void process_CPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
 }
 
 void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w, int img_c, int mode = 0) {
-    std::string prefix = "GPU processing, mode " + std::to_string(mode);
+    std::string prefix = "GPU, mode " + std::to_string(mode);
+    Timer gpu_timer_hist(prefix + ", histogram calc");
     Timer gpu_timer_memcpy(prefix + ", only memcpy");
     Timer gpu_timer_device(prefix + ", without memcpy");
     Timer gpu_timer(prefix + ", with memcpy");
@@ -269,9 +270,12 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     gpu_timer_device.start();
     rgb2gray_GPU<<<grid_dim, block_dim>>>(rgb_img_device, gray_img_device, img_h, img_w);
     cudaDeviceSynchronize();
+
+    gpu_timer_hist.start();
     hist_func<<<grid_dim, block_dim>>>(gray_img_device, all_hist_device, img_h, img_w);
     cudaDeviceSynchronize();
     histogram_final_GPU<<<1, Y_LEVELS>>>(all_hist_device, histogram_device, grid_dim.x * grid_dim.y);
+    gpu_timer_hist.end();
 
     cudaMemcpy(histogram, histogram_device, Y_LEVELS * sizeof(int), cudaMemcpyDeviceToHost);
     create_mapper(histogram, scaling_coeff, img_h * img_w);
