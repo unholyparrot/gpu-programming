@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <chrono>
+#include <string>
+#include <omp.h>
 
 #define RED         0
 #define GREEN       1
@@ -21,6 +23,8 @@
 
 #define Y_LEVELS 256
 #define BLOCK_SZ 32
+
+static int OMP_THREADS_NUM = 1;
 
 
 class Timer {
@@ -49,10 +53,13 @@ public:
 };
 
 void rgb2gray_CPU(const uint8_t* rgb_image, uint8_t* gray_image, int height, int width) {
+    #pragma omp parallel for
     for (int i = 0; i < height; ++i) {
         for (int j = 0; j < width; ++j) {
-            *gray_image++ = Y_RED * rgb_image[RED] + Y_GREEN * rgb_image[GREEN] + Y_BLUE * rgb_image[BLUE];
-            rgb_image += NUM_COLORS;
+            int linear_idx = i * width + j;
+            gray_image[linear_idx] = Y_RED   * rgb_image[linear_idx * NUM_COLORS + RED]
+                                   + Y_GREEN * rgb_image[linear_idx * NUM_COLORS + GREEN]
+                                   + Y_BLUE  * rgb_image[linear_idx * NUM_COLORS + BLUE];
         }
     }
 }
@@ -136,11 +143,14 @@ void autocontrast_CPU(
     const uint8_t* gray_img, const float* scaling_coef,
     int height, int width, int channels)
 {
+    #pragma omp parallel for
     for (int i = 0; i < height; ++i) {
         for (int j = 0; j < width; ++j) {
-            float coef = scaling_coef[*gray_img++];
+            int linear_idx = i * width + j;
+            float coef = scaling_coef[gray_img[linear_idx]];
+            linear_idx *= channels;
             for (int k = 0; k < channels; ++k) { // RGB or Y
-                *rgb_dst++ = std::min(*rgb_src++ * coef, 255.0f);
+                rgb_dst[linear_idx + k] = std::min(rgb_src[linear_idx + k] * coef, 255.0f);
             }
         }
     }
@@ -182,7 +192,8 @@ void save_image(const char* filename, const uint8_t* img, int height, int width,
 }
 
 void process_CPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w, int img_c) {
-    Timer cpu_timer("CPU processing");
+    Timer cpu_timer(std::string("CPU processing, ") + std::to_string(OMP_THREADS_NUM) + " OMP threads");
+    omp_set_num_threads(OMP_THREADS_NUM);
     cpu_timer.start();
     uint8_t* gray_img = new uint8_t[img_h * img_w];
     int histogram[Y_LEVELS] = {};
@@ -287,6 +298,15 @@ int main(int argc, char** argv) {
     std::cout << "Image loaded successfully. Shape: (" << img_h << ", " << img_w << ", " << img_c << ")" << std::endl;
     uint8_t* res_img = new uint8_t[img_h * img_w * img_c];
 
+    OMP_THREADS_NUM = 1;
+    process_CPU(rgb_img, res_img, img_h, img_w, img_c);
+    save_image(argv[2], res_img, img_h, img_w, img_c);
+
+    OMP_THREADS_NUM = 4;
+    process_CPU(rgb_img, res_img, img_h, img_w, img_c);
+    save_image(argv[2], res_img, img_h, img_w, img_c);
+
+    OMP_THREADS_NUM = 8;
     process_CPU(rgb_img, res_img, img_h, img_w, img_c);
     save_image(argv[2], res_img, img_h, img_w, img_c);
 

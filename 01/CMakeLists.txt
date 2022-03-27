@@ -15,6 +15,12 @@ set_property(TARGET main
 set_property(TARGET main 
     PROPERTY CXX_STANDARD 17)
 
+find_package(OpenMP REQUIRED)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(main PUBLIC OpenMP::OpenMP_CXX)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /openmp")
+endif()
+
 if(APPLE)
     # We need to add the path to the driver (libcuda.dylib) as an rpath, 
     # so that the static cuda runtime can find it at runtime.
