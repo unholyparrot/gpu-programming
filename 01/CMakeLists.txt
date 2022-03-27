@@ -6,6 +6,9 @@ include(CTest)
 add_executable(main
     stb_image.h
     stb_image_write.h
+    util.h
+    histogram.h
+    histogram.cu
     main.cu
 )
 

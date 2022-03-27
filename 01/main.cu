@@ -8,49 +8,13 @@
 #include <fstream>
 #include <cstdint>
 #include <cstdlib>
-#include <chrono>
 #include <string>
 #include <omp.h>
 
-#define RED         0
-#define GREEN       1
-#define BLUE        2
-#define NUM_COLORS  3
-
-#define Y_RED   0.2125f
-#define Y_GREEN 0.7154f
-#define Y_BLUE  0.0721f
-
-#define Y_LEVELS 256
-#define BLOCK_SZ 32
+#include "util.h"
+#include "histogram.h"
 
 static int OMP_THREADS_NUM = 1;
-
-
-class Timer {
-    std::string timer_name;
-    std::chrono::steady_clock::time_point start_point;
-    bool started = false;
-public:
-    std::chrono::microseconds elapsed_time;
-    Timer(const std::string &timer_name) : timer_name(timer_name), elapsed_time(0) {}
-
-    inline void start() {
-        started = true;
-        start_point = std::chrono::steady_clock::now();
-    }
-    inline void end() {
-        std::chrono::steady_clock::time_point end_point = std::chrono::steady_clock::now();
-        if (started) {
-            elapsed_time += std::chrono::duration_cast<std::chrono::microseconds>(end_point - start_point);
-        }
-        started = false;
-    }
-
-    ~Timer() {
-        std::cout << "Elapsed time on " << timer_name << ":\t" << elapsed_time.count() << "\t[microseconds]" << std::endl;
-    }
-};
 
 void rgb2gray_CPU(const uint8_t* rgb_image, uint8_t* gray_image, int height, int width) {
     #pragma omp parallel for
@@ -87,65 +51,6 @@ void histogram_CPU(const uint8_t* gray_img, int* hist, int height, int width) {
     for (int i = 0; i < height; ++i)
         for (int j = 0; j < width; ++j)
             ++hist[*gray_img++];
-}
-
-__global__ void histogram_local_GPU_globalmem(const uint8_t *gray_img, int* all_hists, int height, int width) {
-    int t = threadIdx.y * blockDim.x + threadIdx.x; // thread linear idx in block
-    int num_threads = blockDim.x * blockDim.y;      // thread total count in block
-    
-    // initialize local hist in global memory
-    all_hists += (blockIdx.y * gridDim.x + blockIdx.x) * Y_LEVELS;
-    for (int i = t; i < Y_LEVELS; i += num_threads)
-        all_hists[i] = 0;
-
-    // coordinates of the first pixel to process
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    // number of processed pixels by step
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-
-    for (int i = y; i < height; i += ny)
-        for (int j = x; j < width; j += nx)
-            atomicAdd(all_hists + gray_img[i * width + j], 1);
-}
-
-__global__ void histogram_local_GPU(const uint8_t *gray_img, int* all_hists, int height, int width) {
-    int t = threadIdx.y * blockDim.x + threadIdx.x; // thread linear idx in block
-    int num_threads = blockDim.x * blockDim.y;      // thread total count in block
-    
-    // initialize local histogram for one block
-    __shared__ int local_hist[Y_LEVELS];
-    for (int i = t; i < Y_LEVELS; i += num_threads)
-        local_hist[i] = 0;
-    __syncthreads();
-
-    // coordinates of the first pixel to process
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    // number of processed pixels by step
-    int nx = blockDim.x * gridDim.x;
-    int ny = blockDim.y * gridDim.y;
-
-    for (int i = y; i < height; i += ny)
-        for (int j = x; j < width; j += nx)
-            atomicAdd(local_hist + gray_img[i * width + j], 1);
-    __syncthreads();
-
-    // copy local hist to global memory
-    all_hists += (blockIdx.y * gridDim.x + blockIdx.x) * Y_LEVELS;
-    for (int i = t; i < Y_LEVELS; i += num_threads)
-        all_hists[i] = local_hist[i];
-}
-
-__global__ void histogram_final_GPU(const int *all_hists, int *hist, int num_hists) {
-    int t = blockIdx.x * blockDim.x + threadIdx.x; // thread global idx
-    if (t < Y_LEVELS) {
-        int total = 0;
-        for (int i = 0; i < num_hists; i++) 
-            total += all_hists[i * Y_LEVELS + t];
-        hist[t] = total;
-    }
 }
 
 void create_mapper(const int* hist, float* scaling_coeff, int pixel_count) {
