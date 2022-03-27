@@ -8,6 +8,7 @@
 #include <fstream>
 #include <cstdint>
 #include <cstdlib>
+#include <chrono>
 
 #define RED         0
 #define GREEN       1
@@ -20,6 +21,32 @@
 
 #define Y_LEVELS 256
 #define BLOCK_SZ 32
+
+
+class Timer {
+    std::string timer_name;
+    std::chrono::steady_clock::time_point start_point;
+    std::chrono::microseconds elapsed_time;
+    bool started = false;
+public:
+    Timer(const std::string &timer_name) : timer_name(timer_name), elapsed_time(0) {}
+
+    inline void start() {
+        started = true;
+        start_point = std::chrono::steady_clock::now();
+    }
+    inline void end() {
+        std::chrono::steady_clock::time_point end_point = std::chrono::steady_clock::now();
+        if (started) {
+            elapsed_time += std::chrono::duration_cast<std::chrono::microseconds>(end_point - start_point);
+        }
+        started = false;
+    }
+
+    ~Timer() {
+        std::cout << "Elapsed time on " << timer_name << ": " << elapsed_time.count() << " [microseconds]" << std::endl;
+    }
+};
 
 void rgb2gray_CPU(const uint8_t* rgb_image, uint8_t* gray_image, int height, int width) {
     for (int i = 0; i < height; ++i) {
@@ -155,7 +182,8 @@ void save_image(const char* filename, const uint8_t* img, int height, int width,
 }
 
 void process_CPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w, int img_c) {
-    // Allocate memory, initialize arrays
+    Timer cpu_timer("CPU processing");
+    cpu_timer.start();
     uint8_t* gray_img = new uint8_t[img_h * img_w];
     int histogram[Y_LEVELS] = {};
     float scaling_coeff[Y_LEVELS] = {};
@@ -175,9 +203,13 @@ void process_CPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     }
 #endif
     delete[] gray_img;
+    cpu_timer.end();
 }
 
 void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w, int img_c) {
+    Timer gpu_timer("GPU processing (with memcpy)");
+    Timer gpu_timer_device("GPU processing (without memcpy)");
+    gpu_timer.start();
     // Dimensions of grid and block
     dim3 grid_dim((img_w + BLOCK_SZ - 1) / BLOCK_SZ, (img_h + BLOCK_SZ - 1) / BLOCK_SZ);
     dim3 block_dim(BLOCK_SZ, BLOCK_SZ);
@@ -196,8 +228,11 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     cudaMalloc(&scaling_coeff_device,   Y_LEVELS * sizeof(float));
 
     cudaMemcpy(rgb_img_device, rgb_img, img_h * img_w * img_c, cudaMemcpyHostToDevice);
+    gpu_timer_device.start();
     rgb2gray_GPU<<<grid_dim, block_dim>>>(rgb_img_device, gray_img_device, img_h, img_w);
+    cudaDeviceSynchronize();
     histogram_local_GPU<<<grid_dim, block_dim>>>(gray_img_device, all_hist_device, img_h, img_w);
+    cudaDeviceSynchronize();
     histogram_final_GPU<<<1, Y_LEVELS>>>(all_hist_device, histogram_device, grid_dim.x * grid_dim.y);
 
     cudaMemcpy(histogram, histogram_device, Y_LEVELS * sizeof(int), cudaMemcpyDeviceToHost);
@@ -205,6 +240,8 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     cudaMemcpy(scaling_coeff_device, scaling_coeff, Y_LEVELS * sizeof(float), cudaMemcpyHostToDevice);
 
     autocontrast_GPU<<<grid_dim, block_dim>>>(rgb_img_device, res_img_device, gray_img_device, scaling_coeff_device, img_h, img_w, img_c);
+    cudaDeviceSynchronize();
+    gpu_timer_device.end();
     cudaMemcpy(res_img, res_img_device, img_h * img_w * img_c, cudaMemcpyDeviceToHost);
 #ifdef _DEBUG
     {
@@ -231,6 +268,7 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     cudaFree(&all_hist_device);
     cudaFree(&histogram_device);
     cudaFree(&scaling_coeff_device);
+    gpu_timer.end();
 }
 
 int main(int argc, char** argv) {
