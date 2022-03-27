@@ -14,10 +14,16 @@
     * Задание выполнено на CUDA (GPU часть)
     * Для чтения/записи изображений используется stb_image
     * Сборка с помощью CMake:
-
-        mkdir build && cd build
+        mkdir build
+        cd build
         cmake -DCMAKE_BUILD_TYPE=Release ..
-        cmake --build .
+        make
+
+    * На Windows (чтобы собрался Release):
+        mkdir build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=Release ..
+        cmake --build . --config Release
 
 Запуск приложения
     * На вход подается путь к изображению `path_to_image`
