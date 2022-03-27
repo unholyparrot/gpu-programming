@@ -149,10 +149,6 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     Timer gpu_timer_memcpy(prefix + ", only memcpy");
     Timer gpu_timer_device(prefix + ", without memcpy");
     Timer gpu_timer(prefix + ", with memcpy");
-    auto hist_func = histogram_local_GPU;
-    if (mode == 1) {
-        hist_func = histogram_local_GPU_globalmem;
-    }
     gpu_timer.start();
     // Dimensions of grid and block
     dim3 grid_dim((img_w + BLOCK_SZ - 1) / BLOCK_SZ, (img_h + BLOCK_SZ - 1) / BLOCK_SZ);
@@ -177,9 +173,19 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     cudaDeviceSynchronize();
 
     gpu_timer_hist.start();
-    hist_func<<<grid_dim, block_dim>>>(gray_img_device, all_hist_device, img_h, img_w);
+    switch (mode) {
+    case 0:
+        histogram_global_GPU<<<grid_dim, block_dim>>>(gray_img_device, histogram_device, img_h, img_w);
+        break;
+    case 1:
+        histogram_local_globalmem_GPU<<<grid_dim, block_dim>>>(gray_img_device, all_hist_device, img_h, img_w);
+        histogram_finalize_GPU<<<1, Y_LEVELS>>>(all_hist_device, histogram_device, grid_dim.x * grid_dim.y);
+        break;
+    case 2:
+        histogram_local_sharedmem_GPU<<<grid_dim, block_dim>>>(gray_img_device, all_hist_device, img_h, img_w);
+        histogram_finalize_GPU<<<1, Y_LEVELS>>>(all_hist_device, histogram_device, grid_dim.x * grid_dim.y);
+    }
     cudaDeviceSynchronize();
-    histogram_final_GPU<<<1, Y_LEVELS>>>(all_hist_device, histogram_device, grid_dim.x * grid_dim.y);
     gpu_timer_hist.end();
 
     cudaMemcpy(histogram, histogram_device, Y_LEVELS * sizeof(int), cudaMemcpyDeviceToHost);
@@ -222,8 +228,9 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
 const char* HELP_MSG = "\
 Usage: ./main <input_image> [<output_image_CPU> <output_image_GPU> <GPU mode>]\n\n\
 Modes for benchmarking different histogram realizations -- param <GPU mode>:\n\n\
-    0 -- shared memory for local histograms (default)\n\
+    0 -- global memory for one histogram\n\
     1 -- global memory for local histograms\n\
+    2 -- shared memory for local histograms (best)\n\
 ";
 
 int main(int argc, char** argv) {
@@ -265,12 +272,16 @@ int main(int argc, char** argv) {
     process_CPU(rgb_img, res_img, img_h, img_w, img_c);
     save_image(out_fname_cpu.c_str(), res_img, img_h, img_w, img_c);
 
-    // GPU, mode 0 (default)
+    // GPU, mode 0
     process_GPU(rgb_img, res_img, img_h, img_w, img_c, 0);
     save_image(out_fname_gpu.c_str(), res_img, img_h, img_w, img_c);
 
     // GPU, mode 1
     process_GPU(rgb_img, res_img, img_h, img_w, img_c, 1);
+    save_image(out_fname_gpu.c_str(), res_img, img_h, img_w, img_c);
+
+    // GPU, mode 2
+    process_GPU(rgb_img, res_img, img_h, img_w, img_c, 2);
     save_image(out_fname_gpu.c_str(), res_img, img_h, img_w, img_c);
 
     return 0;
