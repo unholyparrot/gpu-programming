@@ -89,6 +89,27 @@ void histogram_CPU(const uint8_t* gray_img, int* hist, int height, int width) {
             ++hist[*gray_img++];
 }
 
+__global__ void histogram_local_GPU_globalmem(const uint8_t *gray_img, int* all_hists, int height, int width) {
+    int t = threadIdx.y * blockDim.x + threadIdx.x; // thread linear idx in block
+    int num_threads = blockDim.x * blockDim.y;      // thread total count in block
+    
+    // initialize local hist in global memory
+    all_hists += (blockIdx.y * gridDim.x + blockIdx.x) * Y_LEVELS;
+    for (int i = t; i < Y_LEVELS; i += num_threads)
+        all_hists[i] = 0;
+
+    // coordinates of the first pixel to process
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    // number of processed pixels by step
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+
+    for (int i = y; i < height; i += ny)
+        for (int j = x; j < width; j += nx)
+            atomicAdd(all_hists + gray_img[i * width + j], 1);
+}
+
 __global__ void histogram_local_GPU(const uint8_t *gray_img, int* all_hists, int height, int width) {
     int t = threadIdx.y * blockDim.x + threadIdx.x; // thread linear idx in block
     int num_threads = blockDim.x * blockDim.y;      // thread total count in block
@@ -217,10 +238,15 @@ void process_CPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     cpu_timer.end();
 }
 
-void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w, int img_c) {
-    Timer gpu_timer_memcpy("GPU processing, only memcpy");
-    Timer gpu_timer_device("GPU processing, without memcpy");
-    Timer gpu_timer("GPU processing, with memcpy");
+void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w, int img_c, int mode = 0) {
+    std::string prefix = "GPU processing, mode " + std::to_string(mode);
+    Timer gpu_timer_memcpy(prefix + ", only memcpy");
+    Timer gpu_timer_device(prefix + ", without memcpy");
+    Timer gpu_timer(prefix + ", with memcpy");
+    auto hist_func = histogram_local_GPU;
+    if (mode == 1) {
+        hist_func = histogram_local_GPU_globalmem;
+    }
     gpu_timer.start();
     // Dimensions of grid and block
     dim3 grid_dim((img_w + BLOCK_SZ - 1) / BLOCK_SZ, (img_h + BLOCK_SZ - 1) / BLOCK_SZ);
@@ -243,7 +269,7 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     gpu_timer_device.start();
     rgb2gray_GPU<<<grid_dim, block_dim>>>(rgb_img_device, gray_img_device, img_h, img_w);
     cudaDeviceSynchronize();
-    histogram_local_GPU<<<grid_dim, block_dim>>>(gray_img_device, all_hist_device, img_h, img_w);
+    hist_func<<<grid_dim, block_dim>>>(gray_img_device, all_hist_device, img_h, img_w);
     cudaDeviceSynchronize();
     histogram_final_GPU<<<1, Y_LEVELS>>>(all_hist_device, histogram_device, grid_dim.x * grid_dim.y);
 
@@ -284,9 +310,16 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     gpu_timer_memcpy.elapsed_time = gpu_timer.elapsed_time - gpu_timer_device.elapsed_time;
 }
 
+const char* HELP_MSG = "\
+Usage: ./main <input_image> [<output_image_CPU> <output_image_GPU> <GPU mode>]\n\n\
+Modes for benchmarking different histogram realizations -- param <GPU mode>:\n\n\
+    0 -- shared memory for local histograms (default)\n\
+    1 -- global memory for local histograms\n\
+";
+
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::cout << "Usage: ./main <input_image> [<output_image_CPU> <output_image_GPU>]" << std::endl;
+    if (argc < 2 || !strcmp(argv[1], "-h")) {
+        std::cout << HELP_MSG << std::endl;
         return 0;
     }
     std::string in_fname(argv[1]);
@@ -323,8 +356,13 @@ int main(int argc, char** argv) {
     process_CPU(rgb_img, res_img, img_h, img_w, img_c);
     save_image(out_fname_cpu.c_str(), res_img, img_h, img_w, img_c);
 
-    process_GPU(rgb_img, res_img, img_h, img_w, img_c);
+    // GPU, mode 0 (default)
+    process_GPU(rgb_img, res_img, img_h, img_w, img_c, 0);
     save_image(out_fname_gpu.c_str(), res_img, img_h, img_w, img_c);
-    
+
+    // GPU, mode 1
+    process_GPU(rgb_img, res_img, img_h, img_w, img_c, 1);
+    save_image(out_fname_gpu.c_str(), res_img, img_h, img_w, img_c);
+
     return 0;
 }
