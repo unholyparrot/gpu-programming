@@ -283,14 +283,25 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
 }
 
 int main(int argc, char** argv) {
-    if (argc < 4) {
-        std::cout << "Usage: <input_image> <output_image_CPU> <output_image_GPU>" << std::endl;
+    if (argc < 2) {
+        std::cout << "Usage: ./main <input_image> [<output_image_CPU> <output_image_GPU>]" << std::endl;
         return 0;
     }
+    std::string in_fname(argv[1]);
+    std::string out_fname_cpu, out_fname_gpu;
+    if (argc > 2)
+        out_fname_cpu = argv[2];
+    else
+        out_fname_cpu = "out_cpu.png";
+    if (argc > 3)
+        out_fname_gpu = argv[3];
+    else
+        out_fname_gpu = "out_gpu.png";
+
 
     /// Load image
     int img_h, img_w, img_c;
-    uint8_t* rgb_img = stbi_load(argv[1], &img_w, &img_h, &img_c, 0);
+    uint8_t* rgb_img = stbi_load(in_fname.c_str(), &img_w, &img_h, &img_c, 0);
     if (!rgb_img) {
         std::cout << stbi_failure_reason() << std::endl;
         return 1;
@@ -300,18 +311,18 @@ int main(int argc, char** argv) {
 
     OMP_THREADS_NUM = 1;
     process_CPU(rgb_img, res_img, img_h, img_w, img_c);
-    save_image(argv[2], res_img, img_h, img_w, img_c);
+    save_image(out_fname_cpu.c_str(), res_img, img_h, img_w, img_c);
 
     OMP_THREADS_NUM = 4;
     process_CPU(rgb_img, res_img, img_h, img_w, img_c);
-    save_image(argv[2], res_img, img_h, img_w, img_c);
+    save_image(out_fname_cpu.c_str(), res_img, img_h, img_w, img_c);
 
     OMP_THREADS_NUM = 8;
     process_CPU(rgb_img, res_img, img_h, img_w, img_c);
-    save_image(argv[2], res_img, img_h, img_w, img_c);
+    save_image(out_fname_cpu.c_str(), res_img, img_h, img_w, img_c);
 
     process_GPU(rgb_img, res_img, img_h, img_w, img_c);
-    save_image(argv[3], res_img, img_h, img_w, img_c);
+    save_image(out_fname_gpu.c_str(), res_img, img_h, img_w, img_c);
     
     return 0;
 }
