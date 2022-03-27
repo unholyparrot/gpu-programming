@@ -48,7 +48,7 @@ public:
     }
 
     ~Timer() {
-        std::cout << "Elapsed time on " << timer_name << ": " << elapsed_time.count() << " [microseconds]" << std::endl;
+        std::cout << "Elapsed time on " << timer_name << ":\t" << elapsed_time.count() << "\t[microseconds]" << std::endl;
     }
 };
 
@@ -218,8 +218,8 @@ void process_CPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
 }
 
 void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w, int img_c) {
-    Timer gpu_timer("GPU processing (with memcpy)");
-    Timer gpu_timer_device("GPU processing (without memcpy)");
+    Timer gpu_timer("GPU processing, with memcpy");
+    Timer gpu_timer_device("GPU processing, without memcpy");
     gpu_timer.start();
     // Dimensions of grid and block
     dim3 grid_dim((img_w + BLOCK_SZ - 1) / BLOCK_SZ, (img_h + BLOCK_SZ - 1) / BLOCK_SZ);
