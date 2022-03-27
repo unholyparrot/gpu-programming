@@ -148,7 +148,7 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     Timer gpu_timer_hist(prefix + ", histogram calc");
     Timer gpu_timer_memcpy(prefix + ", only memcpy");
     Timer gpu_timer_device(prefix + ", without memcpy");
-    Timer gpu_timer(prefix + ", with memcpy");
+    Timer gpu_timer(prefix + ", total process");
     gpu_timer.start();
     // Dimensions of grid and block
     dim3 grid_dim((img_w + BLOCK_SZ - 1) / BLOCK_SZ, (img_h + BLOCK_SZ - 1) / BLOCK_SZ);
@@ -225,30 +225,15 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     gpu_timer_memcpy.elapsed_time = gpu_timer.elapsed_time - gpu_timer_device.elapsed_time;
 }
 
-const char* HELP_MSG = "\
-Usage: ./main <input_image> [<output_image_CPU> <output_image_GPU> <GPU mode>]\n\n\
-Modes for benchmarking different histogram realizations -- param <GPU mode>:\n\n\
-    0 -- global memory for one histogram\n\
-    1 -- global memory for local histograms\n\
-    2 -- shared memory for local histograms (best)\n\
-";
-
 int main(int argc, char** argv) {
     if (argc < 2 || !strcmp(argv[1], "-h")) {
-        std::cout << HELP_MSG << std::endl;
+        std::cout << "Usage: ./main <input_image> [-b --benchmark]" << std::endl;
         return 0;
     }
     std::string in_fname(argv[1]);
-    std::string out_fname_cpu, out_fname_gpu;
-    if (argc > 2)
-        out_fname_cpu = argv[2];
-    else
-        out_fname_cpu = "out_cpu.png";
-    if (argc > 3)
-        out_fname_gpu = argv[3];
-    else
-        out_fname_gpu = "out_gpu.png";
-
+    std::string out_fname_cpu("out_cpu.png");
+    std::string out_fname_gpu("out_gpu.png");
+    bool benchmark = (argc > 2 && (!strcmp(argv[2], "-b") || !strcmp(argv[2], "--benchmark")));
 
     /// Load image
     int img_h, img_w, img_c;
@@ -266,21 +251,19 @@ int main(int argc, char** argv) {
 
     OMP_THREADS_NUM = 4;
     process_CPU(rgb_img, res_img, img_h, img_w, img_c);
-    save_image(out_fname_cpu.c_str(), res_img, img_h, img_w, img_c);
 
-    OMP_THREADS_NUM = 8;
-    process_CPU(rgb_img, res_img, img_h, img_w, img_c);
-    save_image(out_fname_cpu.c_str(), res_img, img_h, img_w, img_c);
+    if (benchmark) {
+        OMP_THREADS_NUM = 8;
+        process_CPU(rgb_img, res_img, img_h, img_w, img_c);
 
-    // GPU, mode 0
-    process_GPU(rgb_img, res_img, img_h, img_w, img_c, 0);
-    save_image(out_fname_gpu.c_str(), res_img, img_h, img_w, img_c);
+        std::cout << "Mode 0 -- one histogram for all thread blocks in global memory" << std::endl;
+        process_GPU(rgb_img, res_img, img_h, img_w, img_c, 0);
 
-    // GPU, mode 1
-    process_GPU(rgb_img, res_img, img_h, img_w, img_c, 1);
-    save_image(out_fname_gpu.c_str(), res_img, img_h, img_w, img_c);
+        std::cout << "Mode 1 -- local histograms for each thread block in global memory" << std::endl;
+        process_GPU(rgb_img, res_img, img_h, img_w, img_c, 1);
+    }
 
-    // GPU, mode 2
+    std::cout << "Mode 2 -- local histograms for each thread block in shared memory" << std::endl;
     process_GPU(rgb_img, res_img, img_h, img_w, img_c, 2);
     save_image(out_fname_gpu.c_str(), res_img, img_h, img_w, img_c);
 
