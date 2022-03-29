@@ -133,11 +133,11 @@ void process_CPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
     autocontrast_CPU(rgb_img, res_img, gray_img, scaling_coeff, img_h, img_w, img_c);
 #ifdef _DEBUG
     {
-        save_image("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_grayscale_CPU.png", gray_img, img_h, img_w, 1);
-        save_image("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result_CPU.png", res_img, img_h, img_w, img_c);
+        save_image("_debug_grayscale_CPU.png", gray_img, img_h, img_w, 1);
+        save_image("_debug_result_CPU.png", res_img, img_h, img_w, img_c);
         uint8_t* gray_res = new uint8_t[img_h * img_w];
         autocontrast_CPU(gray_img, gray_res, gray_img, scaling_coeff, img_h, img_w, 1);
-        save_image("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result_gray_CPU.png", gray_res, img_h, img_w, 1);
+        save_image("_debug_result_gray_CPU.png", gray_res, img_h, img_w, 1);
         delete[] gray_res;
     }
 #endif
@@ -203,15 +203,15 @@ void process_GPU(const uint8_t* rgb_img, uint8_t* res_img, int img_h, int img_w,
         uint8_t* gray_img = new uint8_t[img_h * img_w];
         cudaMemcpy(gray_img, gray_img_device, img_h * img_w, cudaMemcpyDeviceToHost);
         cudaDeviceSynchronize();
-        save_image("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_grayscale_GPU.png", gray_img, img_h, img_w, 1);
-        save_image("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result_GPU.png", res_img, img_h, img_w, img_c);
+        save_image("_debug_grayscale_GPU.png", gray_img, img_h, img_w, 1);
+        save_image("_debug_result_GPU.png", res_img, img_h, img_w, img_c);
 
         uint8_t *gray_res_device;
         cudaMalloc(&gray_res_device, img_h * img_w * sizeof(uint8_t));
         autocontrast_GPU<<<grid_dim, block_dim>>>(gray_img_device, gray_res_device, gray_img_device, scaling_coeff_device, img_h, img_w, 1);
         cudaMemcpy(gray_img, gray_res_device, img_h * img_w, cudaMemcpyDeviceToHost);
         cudaDeviceSynchronize();
-        save_image("C:/Users/kosto/Desktop/work/gpu_programming/misc_files/_debug_result_gray_GPU.png", gray_img, img_h, img_w, 1);
+        save_image("_debug_result_gray_GPU.png", gray_img, img_h, img_w, 1);
 
         delete[] gray_img;
         cudaFree(gray_res_device);
