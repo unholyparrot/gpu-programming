@@ -11,6 +11,10 @@
 #define Y_GREEN 0.7154f
 #define Y_BLUE  0.0721f
 
+// #define Y_RED   0.299f
+// #define Y_GREEN 0.587f
+// #define Y_BLUE  0.114f
+
 #define Y_LEVELS 256
 #define BLOCK_SZ 32
 

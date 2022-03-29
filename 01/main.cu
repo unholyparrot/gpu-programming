@@ -73,10 +73,11 @@ void autocontrast_CPU(
     for (int i = 0; i < height; ++i) {
         for (int j = 0; j < width; ++j) {
             int linear_idx = i * width + j;
-            float coef = scaling_coef[gray_img[linear_idx]];
+            uint8_t y_old = gray_img[linear_idx];
+            float y_new = scaling_coef[y_old] * y_old;
             linear_idx *= channels;
             for (int k = 0; k < channels; ++k) { // RGB or Y
-                rgb_dst[linear_idx + k] = std::min(rgb_src[linear_idx + k] * coef, 255.0f);
+                rgb_dst[linear_idx + k] = std::min(std::max(rgb_src[linear_idx + k] + y_new - y_old, 0.0f), 255.0f);
             }
         }
     }
@@ -99,10 +100,11 @@ __global__ void autocontrast_GPU(
             int linear_idx = i * width + j;
             const uint8_t* in_pixel = rgb_src + channels * linear_idx;
             uint8_t* out_pixel = rgb_dst + channels * linear_idx;
-            float coef = scaling_coef[gray_img[linear_idx]];
+            uint8_t y_old = gray_img[linear_idx];
+            float y_new = scaling_coef[y_old] * y_old;
 
             for (int k = 0; k < channels; ++k) { // RGB or Y
-                *out_pixel++ = min(*in_pixel++ * coef, 255.0f);
+                *out_pixel++ = min(max(*in_pixel++ + y_new - y_old, 0.0f), 255.0f);
             }
         }
     }
