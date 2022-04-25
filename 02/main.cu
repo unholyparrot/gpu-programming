@@ -39,7 +39,6 @@ public:
     // input, output -- device memory of the same size HxWx1
     void forward(const float* input, float* output, int height, int width) {
         float *tmp1, *tmp2;
-        // float* test_buf = new float[height * width * INTRA_CH];
         cudaMalloc(&tmp1, height * width * INTRA_CH * sizeof(float));
         cudaMalloc(&tmp2, height * width * INTRA_CH * sizeof(float));
 
@@ -52,7 +51,7 @@ public:
         relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
         maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
         height = (height + 1) / 2; width = (width + 1) / 2;
-        
+
         tconv6.forward_transpose(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
         height *= 2; width *= 2;
         relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
@@ -62,9 +61,7 @@ public:
         relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
 
         conv10.forward(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
-        // cudaMemcpy(test_buf, tmp1,  height * width * INTRA_CH * sizeof(float), cudaMemcpyDeviceToHost);
         sigmoid.forward(tmp1, output, height, width, 1);
-        // cudaMemcpy(test_buf, output,  height * width * 1 * sizeof(float), cudaMemcpyDeviceToHost);
 
         cudaFree(tmp1);
         cudaFree(tmp2);
@@ -119,28 +116,20 @@ int main(int argc, char** argv) {
 
     /// Allocate
     uint8_t *img_device;
-    float *test_buf = new float[num_pixels];
     float *input_img_device, *output_img_device;
     cudaMalloc(&img_device, num_pixels * sizeof(uint8_t));
     cudaMalloc(&input_img_device, num_pixels * sizeof(float));
     cudaMalloc(&output_img_device, num_pixels * sizeof(float));
-    cudaMemcpy(img_device, img, num_pixels * sizeof(uint8_t), cudaMemcpyHostToDevice);
-
     Model model;
 
-    /// Process    
+    /// Process
+    cudaMemcpy(img_device, img, num_pixels * sizeof(uint8_t), cudaMemcpyHostToDevice);
     img_byte2float<<<(num_pixels + BLOCK_SZ_1D - 1) / BLOCK_SZ_1D, BLOCK_SZ_1D>>>(img_device, input_img_device, num_pixels);
-    
-    //-//
-    cudaMemcpy(test_buf, input_img_device, num_pixels * sizeof(float), cudaMemcpyDeviceToHost);
-    //-//
-
     model.forward(input_img_device, output_img_device, img_h, img_w);
     img_float2byte<<<(num_pixels + BLOCK_SZ_1D - 1) / BLOCK_SZ_1D, BLOCK_SZ_1D>>>(output_img_device, img_device, num_pixels);
-
     cudaMemcpy(img, img_device, num_pixels * sizeof(uint8_t), cudaMemcpyDeviceToHost);
 
+    /// Save output
     save_image(out_fname_gpu.c_str(), img, img_h, img_w, img_c);
-
     return 0;
 }

@@ -40,10 +40,6 @@ void Conv2d::load_weights(const char* weights_fname, const char* bias_fname) {
             std::cerr << "File with weights do not exist: " << weights_fname << std::endl;
         }
         ifile.read((char*)weights_host, num_weights * sizeof(float));
-        // if (!strcmp(weights_fname, "model/6.weight.bin")) {
-        //     for (int i = 0; i < num_weights; ++i)
-        //         weights_host[i] = i % 8;
-        // }
         ifile.close();
     }
     {
