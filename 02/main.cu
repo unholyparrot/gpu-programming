@@ -9,6 +9,66 @@
 #include <cstdint>
 #include <string>
 
+#include "util.h"
+#include "convolution.h"
+#include "modules.h"
+
+
+
+class Model {
+    Conv2d conv0, conv3, tconv6, tconv8, conv10;
+    ReLU relu;
+    Sigmoid sigmoid;
+    MaxPool2d maxpool;
+
+public:
+    Model() 
+    : conv0(1, INTRA_CH)
+    , conv3(INTRA_CH, INTRA_CH)
+    , tconv6(INTRA_CH, INTRA_CH)
+    , tconv8(INTRA_CH, INTRA_CH)
+    , conv10(INTRA_CH, 1)
+    {
+        conv0.load_weights("weights_0.bin");
+        conv3.load_weights("weights_3.bin");
+        tconv6.load_weights("weights_6.bin");
+        tconv8.load_weights("weights_8.bin");
+        conv10.load_weights("weights_10.bin");
+    }
+
+    // input, output -- device memory of the same size HxWx1
+    void forward(const float* input, float* output, int height, int width) {
+        float *tmp1, *tmp2;
+        cudaMalloc(&tmp1, height * width * INTRA_CH * sizeof(float));
+        cudaMalloc(&tmp2, height * width * INTRA_CH * sizeof(float));
+
+        conv0.forward(input, tmp1, height, width);
+        relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+        maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+        height = (height + 1) / 2; width = (width + 1) / 2;
+
+        conv3.forward(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
+        relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+        maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+        height = (height + 1) / 2; width = (width + 1) / 2;
+
+        tconv6.forward(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
+        height *= 2; width *= 2;
+        relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+
+        tconv8.forward(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
+        height *= 2; width *= 2;
+        relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+
+        conv10.forward(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
+        sigmoid.forward(tmp1, output, height, width, 1);
+
+        cudaFree(tmp1);
+        cudaFree(tmp2);
+    }
+
+};
+
 
 void save_image(const char* filename, const uint8_t* img, int height, int width, int channels) {
     int res = stbi_write_png(filename, width, height, channels, img, 0);
