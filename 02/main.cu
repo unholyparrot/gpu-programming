@@ -23,17 +23,17 @@ class Model {
 
 public:
     Model() 
-    : conv0(1, INTRA_CH)
-    , conv3(INTRA_CH, INTRA_CH)
-    , tconv6(INTRA_CH, INTRA_CH)
-    , tconv8(INTRA_CH, INTRA_CH)
-    , conv10(INTRA_CH, 1)
+    : conv0(1, INTRA_CH, KERNEL_SIZE)
+    , conv3(INTRA_CH, INTRA_CH, KERNEL_SIZE)
+    , tconv6(INTRA_CH, INTRA_CH, KERNEL_TRANSPOSE)
+    , tconv8(INTRA_CH, INTRA_CH, KERNEL_TRANSPOSE)
+    , conv10(INTRA_CH, 1, KERNEL_SIZE)
     {
-        conv0.load_weights("weights_0.bin");
-        conv3.load_weights("weights_3.bin");
-        tconv6.load_weights("weights_6.bin");
-        tconv8.load_weights("weights_8.bin");
-        conv10.load_weights("weights_10.bin");
+        conv0.load_weights("model/weights_0.bin", "model/bias_0.bin");
+        conv3.load_weights("model/weights_3.bin", "model/bias_3.bin");
+        tconv6.load_weights("model/weights_6.bin", "model/bias_6.bin");
+        tconv8.load_weights("model/weights_8.bin", "model/bias_8.bin");
+        conv10.load_weights("model/weights_10.bin", "model/bias_10.bin");
     }
 
     // input, output -- device memory of the same size HxWx1
