@@ -2,6 +2,7 @@
 
 #define KERNEL_SIZE 3
 #define KERNEL_HALF 1
+#define KERNEL_TRANSPOSE 2
 
 #define BLOCK_SZ_1D 1024
 #define BLOCK_SZ_2D 32

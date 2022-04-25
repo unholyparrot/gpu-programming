@@ -20,9 +20,10 @@ __global__ void conv2d(const float* input, float* output, const float* kernel, c
             for (int c = 0; c < channels; ++c) {
                 for (int i = 0; i < KERNEL_SIZE; ++i) {
                     for (int j = 0; j < KERNEL_SIZE; ++j) {
-                        int in_y = CLIP(out_y + i - KERNEL_HALF, 0, height - 1);
-                        int in_x = CLIP(out_x + j - KERNEL_HALF, 0, width - 1);
-                        result += input[c * height * width + in_y * width + in_x] * kernel[c * KERNEL_SIZE * KERNEL_SIZE + i * KERNEL_SIZE + j];
+                        int in_y = out_y + i - KERNEL_HALF;
+                        int in_x = out_x + j - KERNEL_HALF;
+                        if (in_y >= 0 && in_y < height && in_x >= 0 && in_x < width)
+                            result += input[c * height * width + in_y * width + in_x] * kernel[c * KERNEL_SIZE * KERNEL_SIZE + i * KERNEL_SIZE + j];
                     }
                 }
             }
@@ -39,6 +40,10 @@ void Conv2d::load_weights(const char* weights_fname, const char* bias_fname) {
             std::cerr << "File with weights do not exist: " << weights_fname << std::endl;
         }
         ifile.read((char*)weights_host, num_weights * sizeof(float));
+        // if (!strcmp(weights_fname, "model/6.weight.bin")) {
+        //     for (int i = 0; i < num_weights; ++i)
+        //         weights_host[i] = i % 8;
+        // }
         ifile.close();
     }
     {
@@ -85,7 +90,7 @@ __global__ void conv2d_transpose(const float* input, float* output, const float*
             int k_y = out_y % KERNEL_TRANSPOSE;
             float result = 0.0f;
             for (int c = 0; c < channels; ++c) {
-                result += input[int(out_y / 2) * width + int(out_x / 2)] * kernel[c * KERNEL_TRANSPOSE * KERNEL_TRANSPOSE + k_y * KERNEL_TRANSPOSE + k_x];
+                result += input[c * width * height + int(out_y / 2) * width + int(out_x / 2)] * kernel[c * KERNEL_TRANSPOSE * KERNEL_TRANSPOSE + k_y * KERNEL_TRANSPOSE + k_x];
             }
             output[out_y * width * 2 + out_x] = result + bias;
         }
@@ -93,10 +98,10 @@ __global__ void conv2d_transpose(const float* input, float* output, const float*
 }
 
 void Conv2d::forward_transpose(const float* input_device, float* output_device, int height, int width) const {
-    dim3 grid_dim((width + BLOCK_SZ_2D - 1) / BLOCK_SZ_2D, (height + BLOCK_SZ_2D - 1) / BLOCK_SZ_2D);
+    dim3 grid_dim((width * 2 + BLOCK_SZ_2D - 1) / BLOCK_SZ_2D, (height * 2 + BLOCK_SZ_2D - 1) / BLOCK_SZ_2D);
     dim3 block_dim(BLOCK_SZ_2D, BLOCK_SZ_2D);
     int one_filter_size = in_ch * k_size * k_size;
-    int feature_map_size = height * width;
+    int feature_map_size = height * width * 2 * 2;
     for (int i = 0; i < out_ch; ++i) {
         conv2d_transpose<<<grid_dim, block_dim>>>(
             input_device, 
