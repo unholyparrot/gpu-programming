@@ -31,5 +31,6 @@ public:
 
     void load_weights(const char* weights_fname, const char* bias_fname);
     void forward(const float* input_device, float* output_device, int height, int width, int activation_num) const;
+    void forward_optim(const float* input_device, float* output_device, int height, int width, int activation_num) const;
     void forward_transpose(const float* input_device, float* output_device, int height, int width, int activation_num) const;
 };

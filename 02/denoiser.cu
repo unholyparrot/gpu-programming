@@ -64,6 +64,8 @@ public:
         conv10.forward(tmp1, tmp2, height, width, ACTIVATION_NONE); std::swap(tmp1, tmp2);
         sigmoid.forward(tmp1, output, height, width, 1);
 
+        cudaDeviceSynchronize();
+
         cudaFree(tmp1);
         cudaFree(tmp2);
     }
@@ -87,7 +89,38 @@ public:
         tconv8.forward_transpose(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
         height *= 2; width *= 2;
 
-        conv10.forward(tmp1, tmp2, height, width, ACTIVATION_SIGM); std::swap(tmp1, tmp2);
+        conv10.forward(tmp1, output, height, width, ACTIVATION_SIGM);
+
+        cudaDeviceSynchronize();
+
+        cudaFree(tmp1);
+        cudaFree(tmp2);
+    }
+
+    void forward_full_optim(const float* input, float* output, int height, int width) {
+        float *tmp1, *tmp2;
+        cudaMalloc(&tmp1, height * width * INTRA_CH * sizeof(float));
+        cudaMalloc(&tmp2, height * width * INTRA_CH * sizeof(float));
+
+        conv0.forward_optim(input, tmp1, height, width, ACTIVATION_RELU);
+        auto res = cudaDeviceSynchronize();
+
+        maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+        height = (height + 1) / 2; width = (width + 1) / 2;
+
+        conv3.forward(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
+        maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+        height = (height + 1) / 2; width = (width + 1) / 2;
+
+        tconv6.forward_transpose(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
+        height *= 2; width *= 2;
+
+        tconv8.forward_transpose(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
+        height *= 2; width *= 2;
+
+        conv10.forward(tmp1, output, height, width, ACTIVATION_SIGM);
+
+        cudaDeviceSynchronize();
 
         cudaFree(tmp1);
         cudaFree(tmp2);
@@ -167,23 +200,33 @@ int main(int argc, char** argv) {
         timer.start();
         for (int i = 0; i < num_runs; ++i) {
             model.forward(input_img_device, output_img_device, img_h, img_w);
-            cudaDeviceSynchronize();
         }
         timer.end();
         timer.elapsed_time /= num_runs;
     }
-    {
+    
+    if (benchmark) {
         Timer timer("one step (merge activations)");
         timer.start();
         for (int i = 0; i < num_runs; ++i) {
             model.forward_merge_layers(input_img_device, output_img_device, img_h, img_w);
-            cudaDeviceSynchronize();
+        }
+        timer.end();
+        timer.elapsed_time /= num_runs;
+    }
+    
+    {
+        Timer timer("one step (activ + shared mem)");
+        timer.start();
+        for (int i = 0; i < num_runs; ++i) {
+            model.forward_full_optim(input_img_device, output_img_device, img_h, img_w);
         }
         timer.end();
         timer.elapsed_time /= num_runs;
     }
     img_float2byte<<<(num_pixels + BLOCK_SZ_1D - 1) / BLOCK_SZ_1D, BLOCK_SZ_1D>>>(output_img_device, img_device, num_pixels);
     cudaMemcpy(img, img_device, num_pixels * sizeof(uint8_t), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
 
     /// Save output
     save_image(out_fname_gpu.c_str(), img, img_h, img_w, img_c);

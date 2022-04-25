@@ -5,7 +5,7 @@
 #define KERNEL_TRANSPOSE 2
 
 #define BLOCK_SZ_1D 1024
-#define BLOCK_SZ_2D 32
+#define BLOCK_SZ_2D 16
 #define BLOCK_SZ_3D 8
 
 #define INTRA_CH 32
