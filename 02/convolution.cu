@@ -77,13 +77,16 @@ void Conv2d::forward(const float* input_device, float* output_device, int height
     }
 }
 
-__global__ void conv2d_optim(const float* input, float* output, const float* kernel, float bias, int activation_num, int height, int width, int channels) {
+__global__ void conv2d_img_sharedmem(const float* input, float* output, const float* kernel, float bias, int activation_num, int height, int width, int channels) {
     // coordinates of the first pixel to process
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     // number of processed pixels by step
     int nx = blockDim.x * gridDim.x;
     int ny = blockDim.y * gridDim.y;
+    // block start 
+    int bx = blockIdx.x * blockDim.x;
+    int by = blockIdx.y * blockDim.y;
 
     __shared__ float shm_input[INTRA_CH][BLOCK_SZ_2D][BLOCK_SZ_2D];
 
@@ -91,19 +94,80 @@ __global__ void conv2d_optim(const float* input, float* output, const float* ker
     for (int out_y = y; out_y < height; out_y += ny) {
         for (int out_x = x; out_x < width; out_x += nx) {
             for (int c = 0; c < channels; ++c) {
-                shm_input[c][threadIdx.y][threadIdx.x] = input[c * height * width + out_y * width + out_x];
+                shm_input[c][out_y - by][out_x - bx] = input[c * height * width + out_y * width + out_x];
             }
             __syncthreads();
-
             // loop for current elem calculation
             float result = 0.0f;
             for (int c = 0; c < channels; ++c) {
-                for (int i = max(threadIdx.y - KERNEL_HALF, 0u); i < min(threadIdx.y + KERNEL_HALF + 1, BLOCK_SZ_2D); ++i) {
-                    for (int j = max(threadIdx.x - KERNEL_HALF, 0u); j < min(threadIdx.x + KERNEL_HALF + 1, BLOCK_SZ_2D); ++j) {
-                        result += shm_input[c][i][j] * kernel[c * KERNEL_SIZE * KERNEL_SIZE + (i - threadIdx.y + KERNEL_HALF) * KERNEL_SIZE + (j - threadIdx.x + KERNEL_HALF)];
+                for (int i = 0; i < KERNEL_SIZE; ++i) {
+                    for (int j = 0; j < KERNEL_SIZE; ++j) {
+                        int in_y = out_y + i - KERNEL_HALF;
+                        int in_x = out_x + j - KERNEL_HALF;
+                        int local_in_y = in_y - by;
+                        int local_in_x = in_x - bx;
+                        if (in_y >= 0 && in_y < height && in_x >= 0 && in_x < width) {
+                            if (local_in_y >= 0 && local_in_y < blockDim.y && local_in_x >= 0 && local_in_x < blockDim.x) {
+                                result += shm_input[c][local_in_y][local_in_x] * kernel[c * KERNEL_SIZE * KERNEL_SIZE + i * KERNEL_SIZE + j];    
+                            } else {
+                                result += input[c * height * width + in_y * width + in_x] * kernel[c * KERNEL_SIZE * KERNEL_SIZE + i * KERNEL_SIZE + j];
+                            }
+                        }
                     }
                 }
             }
+            result += bias;
+            if (activation_num == ACTIVATION_RELU) {
+                result = max(result, 0.0f);
+            } else if (activation_num == ACTIVATION_SIGM) {
+                result = 1 / (1 + exp(-result));
+            }
+            output[out_y * width + out_x] = result;
+            __syncthreads();
+        }
+    }
+}
+
+__global__ void conv2d_img_sharedmem2(const float* input, float* output, const float* kernel, float bias, int activation_num, int height, int width, int channels) {
+    // coordinates of the first pixel to process
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    // number of processed pixels by step
+    int nx = blockDim.x * gridDim.x;
+    int ny = blockDim.y * gridDim.y;
+    // block start 
+    int bx = blockIdx.x * blockDim.x;
+    int by = blockIdx.y * blockDim.y;
+
+    __shared__ float shm_input[INTRA_CH][BLOCK_SZ_2D][BLOCK_SZ_2D];
+
+    // loop replaces if statement, in most cases calculated once
+    for (int out_y = y; out_y < height; out_y += ny) {
+        for (int out_x = x; out_x < width; out_x += nx) {
+            for (int c = 0; c < channels; ++c) {
+                shm_input[c][out_y - by][out_x - bx] = input[c * height * width + out_y * width + out_x];
+            }
+            __syncthreads();
+            // loop for current elem calculation
+            float result = 0.0f;
+            for (int i = 0; i < KERNEL_SIZE; ++i) {
+                for (int j = 0; j < KERNEL_SIZE; ++j) {
+                    int in_y = out_y + i - KERNEL_HALF;
+                    int in_x = out_x + j - KERNEL_HALF;
+                    int local_in_y = in_y - by;
+                    int local_in_x = in_x - bx;
+                    if (in_y >= 0 && in_y < height && in_x >= 0 && in_x < width) {
+                        if (local_in_y >= 0 && local_in_y < blockDim.y && local_in_x >= 0 && local_in_x < blockDim.x) {
+                            for (int c = 0; c < channels; ++c)
+                                result += shm_input[c][local_in_y][local_in_x] * kernel[c * KERNEL_SIZE * KERNEL_SIZE + i * KERNEL_SIZE + j];    
+                        } else {
+                            for (int c = 0; c < channels; ++c)
+                                result += input[c * height * width + in_y * width + in_x] * kernel[c * KERNEL_SIZE * KERNEL_SIZE + i * KERNEL_SIZE + j];
+                        }
+                    }
+                }
+            }
+            
             result += bias;
             if (activation_num == ACTIVATION_RELU) {
                 result = max(result, 0.0f);
@@ -122,7 +186,7 @@ void Conv2d::forward_optim(const float* input_device, float* output_device, int 
     int one_filter_size = in_ch * k_size * k_size;
     int feature_map_size = height * width;
     for (int i = 0; i < out_ch; ++i) {
-        conv2d_optim<<<grid_dim, block_dim>>>(
+        conv2d_img_sharedmem<<<grid_dim, block_dim>>>(
             input_device, 
             output_device + i * feature_map_size, 
             weights_device + i * one_filter_size,

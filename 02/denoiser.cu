@@ -205,7 +205,7 @@ int main(int argc, char** argv) {
         timer.elapsed_time /= num_runs;
     }
     
-    if (benchmark) {
+    {
         Timer timer("one step (merge activations)");
         timer.start();
         for (int i = 0; i < num_runs; ++i) {
@@ -215,7 +215,7 @@ int main(int argc, char** argv) {
         timer.elapsed_time /= num_runs;
     }
     
-    {
+    if (benchmark) {
         Timer timer("one step (activ + shared mem)");
         timer.start();
         for (int i = 0; i < num_runs; ++i) {
