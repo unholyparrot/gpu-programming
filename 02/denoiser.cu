@@ -108,7 +108,7 @@ public:
         maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
         height = (height + 1) / 2; width = (width + 1) / 2;
 
-        conv3.forward(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
+        conv3.forward_optim(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
         maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
         height = (height + 1) / 2; width = (width + 1) / 2;
 
@@ -118,7 +118,7 @@ public:
         tconv8.forward_transpose(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
         height *= 2; width *= 2;
 
-        conv10.forward(tmp1, output, height, width, ACTIVATION_SIGM);
+        conv10.forward_optim(tmp1, output, height, width, ACTIVATION_SIGM);
 
         cudaDeviceSynchronize();
 

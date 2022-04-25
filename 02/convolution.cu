@@ -4,6 +4,29 @@
 #include "util.h"
 #include "convolution.h"
 
+void Conv2d::load_weights(const char* weights_fname, const char* bias_fname) {
+    int num_weights = out_ch * in_ch * k_size * k_size;
+    {
+        std::ifstream ifile(weights_fname, std::ios::binary);
+        if (!ifile.is_open()) {
+            std::cerr << "File with weights do not exist: " << weights_fname << std::endl;
+        }
+        ifile.read((char*)weights_host, num_weights * sizeof(float));
+        ifile.close();
+    }
+    {
+        std::ifstream ifile(bias_fname, std::ios::binary);
+        if (!ifile.is_open()) {
+            std::cerr << "File with biases do not exist: " << bias_fname << std::endl;
+        }
+        ifile.read((char*)bias_host, out_ch * sizeof(float));
+        ifile.close();
+    }
+
+    cudaMemcpy(weights_device, weights_host,  num_weights * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaMemcpy(bias_device, bias_host,  out_ch * sizeof(float), cudaMemcpyHostToDevice);
+}
+
 __global__ void conv2d(const float* input, float* output, const float* kernel, float bias, int activation_num, int height, int width, int channels) {
     // coordinates of the first pixel to process
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -36,29 +59,6 @@ __global__ void conv2d(const float* input, float* output, const float* kernel, f
             output[out_y * width + out_x] = result;
         }
     }
-}
-
-void Conv2d::load_weights(const char* weights_fname, const char* bias_fname) {
-    int num_weights = out_ch * in_ch * k_size * k_size;
-    {
-        std::ifstream ifile(weights_fname, std::ios::binary);
-        if (!ifile.is_open()) {
-            std::cerr << "File with weights do not exist: " << weights_fname << std::endl;
-        }
-        ifile.read((char*)weights_host, num_weights * sizeof(float));
-        ifile.close();
-    }
-    {
-        std::ifstream ifile(bias_fname, std::ios::binary);
-        if (!ifile.is_open()) {
-            std::cerr << "File with biases do not exist: " << bias_fname << std::endl;
-        }
-        ifile.read((char*)bias_host, out_ch * sizeof(float));
-        ifile.close();
-    }
-
-    cudaMemcpy(weights_device, weights_host,  num_weights * sizeof(float), cudaMemcpyHostToDevice);
-    // cudaMemcpy(bias_device, bias_host,  out_ch * sizeof(float), cudaMemcpyHostToDevice);
 }
 
 void Conv2d::forward(const float* input_device, float* output_device, int height, int width, int activation_num) const {
