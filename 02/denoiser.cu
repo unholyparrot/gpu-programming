@@ -110,10 +110,11 @@ int main(int argc, char** argv) {
             std::stringstream ss(argv[3]);
             ss >> num_runs;
         } else {
-            num_runs = 10;
+            num_runs = 100;
         }
-        std::cout << "Starting benchmark: " << num_runs << " runs." << std::endl;
     }
+    std::cout << "Measuring mean time of " << num_runs << " runs." << std::endl;
+    Timer timer("one step");
 
     /// Load image
     int img_h, img_w, img_c;
@@ -137,10 +138,13 @@ int main(int argc, char** argv) {
     cudaMemcpy(img_device, img, num_pixels * sizeof(uint8_t), cudaMemcpyHostToDevice);
     img_byte2float<<<(num_pixels + BLOCK_SZ_1D - 1) / BLOCK_SZ_1D, BLOCK_SZ_1D>>>(img_device, input_img_device, num_pixels);
     cudaDeviceSynchronize();
+    timer.start();
     for (int i = 0; i < num_runs; ++i) {
         model.forward(input_img_device, output_img_device, img_h, img_w);
         cudaDeviceSynchronize();
     }
+    timer.end();
+    timer.elapsed_time /= num_runs;
     img_float2byte<<<(num_pixels + BLOCK_SZ_1D - 1) / BLOCK_SZ_1D, BLOCK_SZ_1D>>>(output_img_device, img_device, num_pixels);
     cudaMemcpy(img, img_device, num_pixels * sizeof(uint8_t), cudaMemcpyDeviceToHost);
 
