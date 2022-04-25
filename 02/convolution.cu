@@ -46,8 +46,8 @@ void Conv2d::load_weights(const char* fname) {
 }
 
 void Conv2d::forward(const float* input_device, float* output_device, int height, int width) const {
-    dim3 grid_dim((width + BLOCK_SIZE - 1) / BLOCK_SIZE, (height + BLOCK_SIZE - 1) / BLOCK_SIZE);
-    dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE);
+    dim3 grid_dim((width + BLOCK_SZ_2D - 1) / BLOCK_SZ_2D, (height + BLOCK_SZ_2D - 1) / BLOCK_SZ_2D);
+    dim3 block_dim(BLOCK_SZ_2D, BLOCK_SZ_2D);
     int one_filter_size = in_ch * KERNEL_SIZE * KERNEL_SIZE;
     int feature_map_size = height * width;
     for (int i = 0; i < out_ch; ++i) {
