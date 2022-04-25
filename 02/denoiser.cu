@@ -8,6 +8,7 @@
 #include <fstream>
 #include <cstdint>
 #include <string>
+#include <sstream>
 
 #include "util.h"
 #include "convolution.h"
@@ -97,12 +98,22 @@ void save_image(const char* filename, const uint8_t* img, int height, int width,
 
 int main(int argc, char** argv) {
     if (argc < 2 || !strcmp(argv[1], "-h")) {
-        std::cout << "Usage: BABABA ./main <input_image> [-b --benchmark]" << std::endl;
+        std::cout << "Usage: ./denoiser <input_image> [-benchmark X]" << std::endl;
         return 0;
     }
     std::string in_fname(argv[1]);
-    std::string out_fname_gpu("out_gpu.png");
+    std::string out_fname_gpu = in_fname.substr(0, in_fname.size() - 4) + "_denoised.png";
+    int num_runs = 1;
     bool benchmark = (argc > 2 && (!strcmp(argv[2], "-b") || !strcmp(argv[2], "--benchmark")));
+    if (benchmark) {
+        if (argc > 3) {
+            std::stringstream ss(argv[3]);
+            ss >> num_runs;
+        } else {
+            num_runs = 10;
+        }
+        std::cout << "Starting benchmark: " << num_runs << " runs." << std::endl;
+    }
 
     /// Load image
     int img_h, img_w, img_c;
@@ -125,7 +136,11 @@ int main(int argc, char** argv) {
     /// Process
     cudaMemcpy(img_device, img, num_pixels * sizeof(uint8_t), cudaMemcpyHostToDevice);
     img_byte2float<<<(num_pixels + BLOCK_SZ_1D - 1) / BLOCK_SZ_1D, BLOCK_SZ_1D>>>(img_device, input_img_device, num_pixels);
-    model.forward(input_img_device, output_img_device, img_h, img_w);
+    cudaDeviceSynchronize();
+    for (int i = 0; i < num_runs; ++i) {
+        model.forward(input_img_device, output_img_device, img_h, img_w);
+        cudaDeviceSynchronize();
+    }
     img_float2byte<<<(num_pixels + BLOCK_SZ_1D - 1) / BLOCK_SZ_1D, BLOCK_SZ_1D>>>(output_img_device, img_device, num_pixels);
     cudaMemcpy(img, img_device, num_pixels * sizeof(uint8_t), cudaMemcpyDeviceToHost);
 
