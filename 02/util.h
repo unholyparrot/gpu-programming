@@ -10,6 +10,10 @@
 
 #define INTRA_CH 32
 
+#define ACTIVATION_NONE 0
+#define ACTIVATION_RELU 1
+#define ACTIVATION_SIGM 2
+
 #define CLIP(x, a, b) max(min((x), (b)), (a))
 
 #include <chrono>

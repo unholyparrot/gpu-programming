@@ -43,26 +43,51 @@ public:
         cudaMalloc(&tmp1, height * width * INTRA_CH * sizeof(float));
         cudaMalloc(&tmp2, height * width * INTRA_CH * sizeof(float));
 
-        conv0.forward(input, tmp1, height, width);
+        conv0.forward(input, tmp1, height, width, ACTIVATION_NONE);
         relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
         maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
         height = (height + 1) / 2; width = (width + 1) / 2;
 
-        conv3.forward(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
+        conv3.forward(tmp1, tmp2, height, width, ACTIVATION_NONE); std::swap(tmp1, tmp2);
         relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
         maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
         height = (height + 1) / 2; width = (width + 1) / 2;
 
-        tconv6.forward_transpose(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
+        tconv6.forward_transpose(tmp1, tmp2, height, width, ACTIVATION_NONE); std::swap(tmp1, tmp2);
         height *= 2; width *= 2;
         relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
 
-        tconv8.forward_transpose(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
+        tconv8.forward_transpose(tmp1, tmp2, height, width, ACTIVATION_NONE); std::swap(tmp1, tmp2);
         height *= 2; width *= 2;
         relu.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
 
-        conv10.forward(tmp1, tmp2, height, width); std::swap(tmp1, tmp2);
+        conv10.forward(tmp1, tmp2, height, width, ACTIVATION_NONE); std::swap(tmp1, tmp2);
         sigmoid.forward(tmp1, output, height, width, 1);
+
+        cudaFree(tmp1);
+        cudaFree(tmp2);
+    }
+
+    void forward_merge_layers(const float* input, float* output, int height, int width) {
+        float *tmp1, *tmp2;
+        cudaMalloc(&tmp1, height * width * INTRA_CH * sizeof(float));
+        cudaMalloc(&tmp2, height * width * INTRA_CH * sizeof(float));
+
+        conv0.forward(input, tmp1, height, width, ACTIVATION_RELU);
+        maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+        height = (height + 1) / 2; width = (width + 1) / 2;
+
+        conv3.forward(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
+        maxpool.forward(tmp1, tmp2, height, width, INTRA_CH); std::swap(tmp1, tmp2);
+        height = (height + 1) / 2; width = (width + 1) / 2;
+
+        tconv6.forward_transpose(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
+        height *= 2; width *= 2;
+
+        tconv8.forward_transpose(tmp1, tmp2, height, width, ACTIVATION_RELU); std::swap(tmp1, tmp2);
+        height *= 2; width *= 2;
+
+        conv10.forward(tmp1, tmp2, height, width, ACTIVATION_SIGM); std::swap(tmp1, tmp2);
 
         cudaFree(tmp1);
         cudaFree(tmp2);
@@ -114,7 +139,6 @@ int main(int argc, char** argv) {
         }
     }
     std::cout << "Measuring mean time of " << num_runs << " runs." << std::endl;
-    Timer timer("one step");
 
     /// Load image
     int img_h, img_w, img_c;
@@ -138,13 +162,26 @@ int main(int argc, char** argv) {
     cudaMemcpy(img_device, img, num_pixels * sizeof(uint8_t), cudaMemcpyHostToDevice);
     img_byte2float<<<(num_pixels + BLOCK_SZ_1D - 1) / BLOCK_SZ_1D, BLOCK_SZ_1D>>>(img_device, input_img_device, num_pixels);
     cudaDeviceSynchronize();
-    timer.start();
-    for (int i = 0; i < num_runs; ++i) {
-        model.forward(input_img_device, output_img_device, img_h, img_w);
-        cudaDeviceSynchronize();
+    if (benchmark) {
+        Timer timer("one step (no optimization)");
+        timer.start();
+        for (int i = 0; i < num_runs; ++i) {
+            model.forward(input_img_device, output_img_device, img_h, img_w);
+            cudaDeviceSynchronize();
+        }
+        timer.end();
+        timer.elapsed_time /= num_runs;
     }
-    timer.end();
-    timer.elapsed_time /= num_runs;
+    {
+        Timer timer("one step (merge activations)");
+        timer.start();
+        for (int i = 0; i < num_runs; ++i) {
+            model.forward_merge_layers(input_img_device, output_img_device, img_h, img_w);
+            cudaDeviceSynchronize();
+        }
+        timer.end();
+        timer.elapsed_time /= num_runs;
+    }
     img_float2byte<<<(num_pixels + BLOCK_SZ_1D - 1) / BLOCK_SZ_1D, BLOCK_SZ_1D>>>(output_img_device, img_device, num_pixels);
     cudaMemcpy(img, img_device, num_pixels * sizeof(uint8_t), cudaMemcpyDeviceToHost);
 

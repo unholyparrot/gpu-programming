@@ -34,6 +34,7 @@
 
 Замеры времени на 100 запусках на изображении из MNIST размером 28x28 пикселей и описание оптимизаций
     1. Базовая версия (без оптимизаций)
-    Elapsed time on one step:       10717   [microseconds]
+    Elapsed time on one step (no optimization):     17870   [microseconds]
 
     2. Перенос функций активации внутрь вычисления сверток
+    Elapsed time on one step (merge activations):   15672   [microseconds]
